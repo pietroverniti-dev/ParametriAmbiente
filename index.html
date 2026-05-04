@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="it" class="antialiased">
+<head>
+    <meta charset="UTF-8">
+    <!-- Meta tag fondamentali per farla sembrare un'app nativa -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0f172a">
+    
+    <title>Stazione Meteo Pro</title>
+    
+    <!-- Librerie Esterne -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', '-apple-system', 'sans-serif'] },
+                    colors: {
+                        brand: { 500: '#3b82f6', 600: '#2563eb' },
+                        dark: { 900: '#0f172a', 800: '#1e293b', 700: '#334155' }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        
+        body { 
+            background-color: #0f172a; 
+            color: #f8fafc;
+            /* Impedisce il bounce effect su iOS */
+            overscroll-behavior-y: none; 
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Nascondi scrollbar ma mantieni la funzionalità */
+        ::-webkit-scrollbar { display: none; }
+        * { scrollbar-width: none; }
+
+        /* Effetti Glass & Card */
+        .glass-nav {
+            background: rgba(30, 41, 59, 0.75);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .widget-card {
+            background: linear-gradient(145deg, #1e293b, #151e2e);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .widget-card:active { transform: scale(0.98); }
+
+        /* Glow animation per la ventola attiva */
+        .fan-active-glow {
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.3), inset 0 0 20px rgba(59, 130, 246, 0.1);
+            border-color: rgba(59, 130, 246, 0.5);
+        }
+
+        /* Slider Mobile-Friendly Premium */
+        input[type=range] {
+            -webkit-appearance: none; width: 100%; background: transparent; height: 30px;
+        }
+        input[type=range]:focus { outline: none; }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 8px; background: #334155; border-radius: 999px;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            height: 28px; width: 28px; border-radius: 50%; background: #ffffff;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5); cursor: pointer; -webkit-appearance: none;
+            margin-top: -10px; border: none; transition: transform 0.1s;
+        }
+        input[type=range]::-webkit-slider-thumb:active { transform: scale(1.15); }
+
+        /* Segmented Control iOS Style */
+        .segmented-control {
+            display: flex; background: #0f172a; padding: 4px; border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .segment-btn {
+            flex: 1; text-align: center; padding: 8px 0; font-size: 13px; font-weight: 600;
+            border-radius: 8px; color: #64748b; transition: all 0.3s;
+        }
+        .segment-btn.active { background: #1e293b; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+
+        /* Nav Tab Animazioni */
+        .nav-item { color: #64748b; transition: color 0.3s; }
+        .nav-item.active { color: #3b82f6; }
+        .nav-indicator {
+            position: absolute; top: -1px; height: 3px; background: #3b82f6; border-radius: 0 0 4px 4px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* Status Dot */
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .status-dot.live { background-color: #10b981; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .status-dot.dead { background-color: #ef4444; }
+
+        /* Fix for desktop layout to not make cards too wide */
+        @media (min-width: 768px) {
+            main { max-width: 1200px; margin: 0 auto; width: 100%; }
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen overflow-hidden">
+
+    <!-- HEADER -->
+    <header class="pt-safe pb-4 px-6 mt-4 flex justify-between items-end flex-shrink-0 md:max-w-6xl md:mx-auto md:w-full">
+        <div>
+            <h1 class="text-2xl font-extrabold tracking-tight text-white">Ambiente</h1>
+            <div class="flex items-center gap-2 mt-1">
+                <div id="livedot" class="status-dot dead"></div>
+                <span id="conn-status" class="text-xs font-semibold text-rose-400">Offline (Simulazione)</span>
+                <span class="text-xs text-slate-500 mx-1">•</span>
+                <span class="text-xs font-mono text-slate-400" id="uptime-val">00:00:00</span>
+            </div>
+        </div>
+        <div class="flex items-center gap-4">
+            <!-- URL Configurator for Standalone use -->
+            <button onclick="configUrl()" class="text-xs text-slate-400 hover:text-white transition-colors">Configura IP</button>
+            <div class="w-10 h-10 rounded-full bg-dark-800 flex items-center justify-center border border-slate-700">
+                <i data-lucide="cpu" class="w-5 h-5 text-slate-400"></i>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN SCROLLABLE AREA -->
+    <main class="flex-grow overflow-y-auto pb-28 px-4 sm:px-6 scroll-smooth">
+        
+        <!-- ==================== TAB 1: DASHBOARD ==================== -->
+        <section id="tab-main" class="block space-y-4 animate-[fadeIn_0.3s_ease-out]">
+            
+            <!-- GRID SENSORI (2x2 Mobile, 4x1 Desktop) -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                
+                <!-- Temp Interna -->
+                <div class="widget-card rounded-[1.5rem] p-5 relative overflow-hidden group">
+                    <div class="absolute top-0 right-0 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl -mr-10 -mt-10"></div>
+                    <div class="flex items-center gap-2 mb-3">
+                        <i data-lucide="thermometer" class="w-5 h-5 text-blue-400"></i>
+                        <span class="text-xs font-semibold text-slate-400">BMP280</span>
+                    </div>
+                    <div class="flex items-start">
+                        <span class="text-4xl font-bold text-white tracking-tighter" id="k-tbmp">--.-</span>
+                        <span class="text-base text-slate-400 ml-1 mt-1">°C</span>
+                    </div>
+                    <div class="mt-2 text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Interna</div>
+                </div>
+
+                <!-- Temp Esterna -->
+                <div class="widget-card rounded-[1.5rem] p-5 relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-24 h-24 bg-orange-500/10 rounded-full blur-2xl -mr-10 -mt-10"></div>
+                    <div class="flex items-center gap-2 mb-3">
+                        <i data-lucide="thermometer-sun" class="w-5 h-5 text-orange-400"></i>
+                        <span class="text-xs font-semibold text-slate-400">AHT20</span>
+                    </div>
+                    <div class="flex items-start">
+                        <span class="text-4xl font-bold text-white tracking-tighter" id="k-taht">--.-</span>
+                        <span class="text-base text-slate-400 ml-1 mt-1">°C</span>
+                    </div>
+                    <div class="mt-2 text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Esterna</div>
+                </div>
+
+                <!-- Umidità -->
+                <div class="widget-card rounded-[1.5rem] p-5 relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-24 h-24 bg-teal-500/10 rounded-full blur-2xl -mr-10 -mt-10"></div>
+                    <div class="flex items-center gap-2 mb-3">
+                        <i data-lucide="droplets" class="w-5 h-5 text-teal-400"></i>
+                        <span class="text-xs font-semibold text-slate-400">RH %</span>
+                    </div>
+                    <div class="flex items-start">
+                        <span class="text-4xl font-bold text-white tracking-tighter" id="k-haht">--.-</span>
+                        <span class="text-base text-slate-400 ml-1 mt-1">%</span>
+                    </div>
+                    <div class="mt-2 text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Umidità</div>
+                </div>
+
+                <!-- Pressione -->
+                <div class="widget-card rounded-[1.5rem] p-5 relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl -mr-10 -mt-10"></div>
+                    <div class="flex items-center gap-2 mb-3">
+                        <i data-lucide="gauge" class="w-5 h-5 text-indigo-400"></i>
+                        <span class="text-xs font-semibold text-slate-400">hPa</span>
+                    </div>
+                    <div class="flex items-start">
+                        <span class="text-3xl font-bold text-white tracking-tighter mt-1" id="k-pbmp">----</span>
+                    </div>
+                    <div class="mt-2 text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Pressione Atm.</div>
+                </div>
+            </div>
+
+            <!-- CONTROLLO CLIMA (Widget HomeKit Style) -->
+            <div id="fan-card" class="widget-card rounded-[1.5rem] p-6 mt-6 transition-all duration-500">
+                <div class="flex justify-between items-start mb-6">
+                    <div class="flex items-center gap-4">
+                        <div id="fan-icon-bg" class="w-12 h-12 rounded-full bg-dark-700 flex items-center justify-center transition-all duration-300">
+                            <i data-lucide="fan" id="fan-icon" class="w-6 h-6 text-slate-300"></i>
+                        </div>
+                        <div>
+                            <h2 class="text-lg font-bold text-white">Ventilazione</h2>
+                            <p class="text-sm text-slate-400" id="fan-status-text">Spenta</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Pulsante Power Manuale -->
+                    <button onclick="toggleFan()" id="btn-fan" disabled class="w-12 h-12 rounded-full bg-dark-900 border border-slate-700 flex items-center justify-center opacity-50 cursor-not-allowed transition-all">
+                        <i data-lucide="power" class="w-5 h-5 text-slate-500" id="power-icon"></i>
+                    </button>
+                </div>
+
+                <!-- Controllo Modalità -->
+                <div class="segmented-control w-full">
+                    <button onclick="setMode(true)" id="btn-mode-auto" class="segment-btn active">Automatico</button>
+                    <button onclick="setMode(false)" id="btn-mode-man" class="segment-btn">Manuale</button>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- ==================== TAB 2: GRAFICI ==================== -->
+        <section id="tab-charts" class="hidden space-y-6 animate-[fadeIn_0.3s_ease-out]">
+            <div class="widget-card rounded-[1.5rem] p-5">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-sm font-bold uppercase tracking-wider text-slate-400">Temperature</h3>
+                    <i data-lucide="activity" class="w-4 h-4 text-slate-500"></i>
+                </div>
+                <div class="relative h-[250px] w-full"><canvas id="chartTemp"></canvas></div>
+            </div>
+
+            <div class="widget-card rounded-[1.5rem] p-5">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-sm font-bold uppercase tracking-wider text-slate-400">Umidità</h3>
+                    <i data-lucide="droplet" class="w-4 h-4 text-slate-500"></i>
+                </div>
+                <div class="relative h-[250px] w-full"><canvas id="chartHum"></canvas></div>
+            </div>
+        </section>
+
+        <!-- ==================== TAB 3: IMPOSTAZIONI ==================== -->
+        <section id="tab-settings" class="hidden animate-[fadeIn_0.3s_ease-out]">
+            <div class="widget-card rounded-[1.5rem] p-6">
+                <h2 class="text-xl font-bold text-white mb-6">Parametri Automazione</h2>
+                
+                <div class="space-y-8">
+                    <!-- Soglia Temp -->
+                    <div>
+                        <div class="flex justify-between items-center mb-4">
+                            <label class="font-semibold text-slate-300 flex items-center gap-2">
+                                <div class="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center text-orange-400"><i data-lucide="thermometer" class="w-4 h-4"></i></div>
+                                Temp. Target
+                            </label>
+                            <span class="text-xl font-bold text-white" id="val-set-temp">28.0°</span>
+                        </div>
+                        <input type="range" id="slider-temp" min="20" max="40" step="0.5" value="28.0" 
+                               oninput="document.getElementById('val-set-temp').innerText = this.value + '°'">
+                    </div>
+
+                    <!-- Soglia Hum -->
+                    <div>
+                        <div class="flex justify-between items-center mb-4">
+                            <label class="font-semibold text-slate-300 flex items-center gap-2">
+                                <div class="w-8 h-8 rounded-full bg-teal-500/20 flex items-center justify-center text-teal-400"><i data-lucide="droplets" class="w-4 h-4"></i></div>
+                                Umidità Target
+                            </label>
+                            <span class="text-xl font-bold text-white" id="val-set-hum">70%</span>
+                        </div>
+                        <input type="range" id="slider-hum" min="40" max="95" step="1" value="70"
+                               oninput="document.getElementById('val-set-hum').innerText = this.value + '%'">
+                    </div>
+
+                    <!-- Speed -->
+                    <div>
+                        <div class="flex justify-between items-center mb-4">
+                            <label class="font-semibold text-slate-300 flex items-center gap-2">
+                                <div class="w-8 h-8 rounded-full bg-brand-500/20 flex items-center justify-center text-brand-400"><i data-lucide="zap" class="w-4 h-4"></i></div>
+                                Potenza Ventola
+                            </label>
+                            <span class="text-xl font-bold text-white" id="val-set-spd">100%</span>
+                        </div>
+                        <input type="range" id="slider-spd" min="30" max="100" step="5" value="100"
+                               oninput="document.getElementById('val-set-spd').innerText = this.value + '%'">
+                    </div>
+
+                    <button onclick="saveSettings()" id="btn-save" class="w-full mt-4 bg-brand-600 hover:bg-brand-500 active:bg-brand-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-brand-500/30 transition-all flex items-center justify-center gap-2 cursor-pointer">
+                        <i data-lucide="save" class="w-5 h-5"></i> Applica Modifiche
+                    </button>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- BOTTOM NAVIGATION BAR (Mobile Native Style) -->
+    <nav class="fixed bottom-0 w-full glass-nav pb-safe md:max-w-6xl md:mx-auto md:left-0 md:right-0 md:rounded-t-2xl">
+        <div class="flex justify-around items-center h-20 px-2 relative">
+            <div id="nav-indicator" class="nav-indicator w-1/3 left-0"></div>
+            
+            <button onclick="switchTab('main', 0)" class="nav-item active flex-1 flex flex-col items-center justify-center gap-1 h-full cursor-pointer" id="btn-tab-main">
+                <i data-lucide="home" class="w-6 h-6"></i>
+                <span class="text-[10px] font-semibold">Home</span>
+            </button>
+            <button onclick="switchTab('charts', 1)" class="nav-item flex-1 flex flex-col items-center justify-center gap-1 h-full cursor-pointer" id="btn-tab-charts">
+                <i data-lucide="bar-chart-2" class="w-6 h-6"></i>
+                <span class="text-[10px] font-semibold">Statistiche</span>
+            </button>
+            <button onclick="switchTab('settings', 2)" class="nav-item flex-1 flex flex-col items-center justify-center gap-1 h-full cursor-pointer" id="btn-tab-settings">
+                <i data-lucide="settings" class="w-6 h-6"></i>
+                <span class="text-[10px] font-semibold">Sistema</span>
+            </button>
+        </div>
+    </nav>
+
+    <script>
+        lucide.createIcons();
+
+        // ================= CONFIGURAZIONE =================
+        // Se apri questo file dal PC o dal telefono senza caricarlo sull'ESP32,
+        // inserisci qui l'IP del tuo ESP32 (es. "http://192.168.1.100").
+        // Se lo lasci vuoto (""), farà richieste relative (ideale se ospitato su ESP32)
+        let ESP_URL = localStorage.getItem('esp_url') || ""; 
+
+        function configUrl() {
+            let url = prompt("Inserisci l'indirizzo IP del tuo ESP32 (es. http://192.168.1.100) oppure lascia vuoto per le richieste relative:", ESP_URL);
+            if (url !== null) {
+                // Rimuovi slash finale se presente
+                if(url.endsWith('/')) url = url.slice(0, -1);
+                ESP_URL = url;
+                localStorage.setItem('esp_url', ESP_URL);
+                fetchData(); // Riprova la connessione
+            }
+        }
+        // ===================================================
+
+        // --- GESTIONE NAVIGAZIONE BOTTOM ---
+        function switchTab(tabId, index) {
+            ['main', 'charts', 'settings'].forEach(id => {
+                document.getElementById('tab-' + id).classList.replace('block', 'hidden');
+                document.getElementById('btn-tab-' + id).classList.remove('active');
+            });
+            document.getElementById('tab-' + tabId).classList.replace('hidden', 'block');
+            document.getElementById('btn-tab-' + tabId).classList.add('active');
+            
+            // Muovi indicatore
+            document.getElementById('nav-indicator').style.transform = `translateX(${index * 100}%)`;
+        }
+
+        // --- CHART.JS CONFIG DARK MODE ---
+        Chart.defaults.color = '#64748b';
+        Chart.defaults.font.family = "'Inter', sans-serif";
+        const gridColor = 'rgba(255, 255, 255, 0.05)';
+        
+        const baseOpts = () => ({
+            responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
+            plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, backgroundColor: 'rgba(15, 23, 42, 0.9)', titleColor: '#fff', bodyColor: '#cbd5e1', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1, padding: 10, cornerRadius: 8 } },
+            scales: { 
+                x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: 6 } }, 
+                y: { grid: { color: gridColor }, border: { display: false } } 
+            }
+        });
+
+        const ctxT = document.getElementById('chartTemp').getContext('2d');
+        const chartTemp = new Chart(ctxT, {
+            type: 'line',
+            data: { labels: [], datasets: [
+                { label: 'Int. °C', data: [], borderColor: '#3b82f6', borderWidth: 3, pointRadius: 0, tension: 0.4 },
+                { label: 'Est. °C', data: [], borderColor: '#f97316', borderWidth: 3, pointRadius: 0, tension: 0.4 }
+            ]}, options: baseOpts()
+        });
+
+        const ctxH = document.getElementById('chartHum').getContext('2d');
+        const chartHum = new Chart(ctxH, {
+            type: 'line',
+            data: { labels: [], datasets: [
+                { label: 'Umidità %', data: [], borderColor: '#14b8a6', borderWidth: 3, pointRadius: 0, fill: true, backgroundColor:'rgba(20, 184, 166, 0.1)', tension: 0.4 }
+            ]}, options: baseOpts()
+        });
+
+        // --- STATO GLOBALE ---
+        let currentAutoMode = true;
+        let currentFanOn = false;
+        let fanRotationDegree = 0;
+        let fanInterval = null;
+        let settingsLoaded = false;
+
+        function updateFanAnimation(isOn) {
+            const icon = document.getElementById('fan-icon');
+            if (isOn && !fanInterval) {
+                fanInterval = setInterval(() => {
+                    fanRotationDegree = (fanRotationDegree + 10) % 360;
+                    icon.style.transform = `rotate(${fanRotationDegree}deg)`;
+                }, 20);
+            } else if (!isOn && fanInterval) {
+                clearInterval(fanInterval);
+                fanInterval = null;
+            }
+        }
+
+        async function setMode(isAuto) {
+            if (currentAutoMode === isAuto) return;
+            const endpoint = ESP_URL + (isAuto ? '/toggleMode?m=1' : '/toggleMode?m=0');
+            try {
+                if (!isMock) await fetch(endpoint);
+                else mock.autoMode = isAuto;
+                fetchData();
+            } catch (e) { console.log(e); }
+        }
+
+        // --- UPDATE UI ---
+        function updateUI(d) {
+            document.getElementById('k-tbmp').textContent = d.tBmp.toFixed(1);
+            document.getElementById('k-taht').textContent = d.tAht.toFixed(1);
+            document.getElementById('k-haht').textContent = d.hAht.toFixed(0);
+            document.getElementById('k-pbmp').textContent = d.pBmp.toFixed(0);
+            
+            let s = d.uptime;
+            document.getElementById('uptime-val').textContent = 
+                `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+
+            currentAutoMode = d.autoMode;
+            currentFanOn = d.fanOn;
+
+            const btnAuto = document.getElementById('btn-mode-auto');
+            const btnMan = document.getElementById('btn-mode-man');
+            const btnFan = document.getElementById('btn-fan');
+            const pwrIcon = document.getElementById('power-icon');
+            const iconBg = document.getElementById('fan-icon-bg');
+            const fanCard = document.getElementById('fan-card');
+            const statusTxt = document.getElementById('fan-status-text');
+            const fanIcon = document.getElementById('fan-icon');
+
+            // Aggiorna Segmented Control
+            if (currentAutoMode) {
+                btnAuto.classList.add('active'); btnMan.classList.remove('active');
+                btnFan.disabled = true;
+                btnFan.className = "w-12 h-12 rounded-full bg-dark-900 border border-slate-700 flex items-center justify-center opacity-50 cursor-not-allowed transition-all";
+                pwrIcon.className = "w-5 h-5 text-slate-600";
+            } else {
+                btnMan.classList.add('active'); btnAuto.classList.remove('active');
+                btnFan.disabled = false;
+                btnFan.className = "w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg active:scale-95 cursor-pointer " + 
+                                   (currentFanOn ? "bg-rose-500 border-none shadow-rose-500/40" : "bg-dark-700 border border-slate-600 hover:bg-dark-600");
+                pwrIcon.className = "w-5 h-5 " + (currentFanOn ? "text-white" : "text-slate-300");
+            }
+
+            // Aggiorna Visuale Ventola
+            if (currentFanOn) {
+                iconBg.className = 'w-12 h-12 rounded-full bg-brand-500/20 flex items-center justify-center transition-all duration-300';
+                fanIcon.className = 'w-6 h-6 text-brand-400';
+                fanCard.classList.add('fan-active-glow');
+                statusTxt.innerHTML = `<span class="text-brand-400 font-semibold">In rotazione</span> • ${d.fanSpeed}%`;
+            } else {
+                iconBg.className = 'w-12 h-12 rounded-full bg-dark-800 flex items-center justify-center transition-all duration-300 border border-slate-700';
+                fanIcon.className = 'w-6 h-6 text-slate-500';
+                fanCard.classList.remove('fan-active-glow');
+                statusTxt.textContent = currentAutoMode ? 'Standby (Auto)' : 'Spenta';
+            }
+            updateFanAnimation(currentFanOn);
+
+            if (!settingsLoaded) {
+                document.getElementById('slider-temp').value = d.tempThresh;
+                document.getElementById('val-set-temp').innerText = d.tempThresh + "°";
+                document.getElementById('slider-hum').value = d.humThresh;
+                document.getElementById('val-set-hum').innerText = d.humThresh + "%";
+                document.getElementById('slider-spd').value = d.fanSpeed;
+                document.getElementById('val-set-spd').innerText = d.fanSpeed + "%";
+                settingsLoaded = true;
+            }
+
+            // Aggiorna grafici solo se ci sono dati nello storico
+            if(d.history && d.history.ts.length > 0) {
+                chartTemp.data.labels = d.history.ts;
+                chartTemp.data.datasets[0].data = d.history.tBmp;
+                chartTemp.data.datasets[1].data = d.history.tAht;
+                chartTemp.update();
+
+                chartHum.data.labels = d.history.ts;
+                chartHum.data.datasets[0].data = d.history.hAht;
+                chartHum.update();
+            }
+        }
+
+        let isMock = false;
+        let mock = { uptime: 0, tBmp: 26.5, tAht: 26.3, hAht: 65, pBmp: 1013, autoMode: true, fanOn: false, tempThresh: 28, humThresh: 70, fanSpeed: 100, history: {ts:[], tBmp:[], tAht:[], hAht:[]} };
+
+        async function toggleFan() {
+            try {
+                if (!isMock) await fetch(ESP_URL + '/toggleFan');
+                else { mock.autoMode = false; mock.fanOn = !currentFanOn; }
+                fetchData();
+            } catch (e) { console.log(e); }
+        }
+
+        async function saveSettings() {
+            const t = document.getElementById('slider-temp').value;
+            const h = document.getElementById('slider-hum').value;
+            const s = document.getElementById('slider-spd').value;
+            const btn = document.getElementById('btn-save');
+            
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i> Sincronizzazione...';
+            lucide.createIcons();
+            
+            try {
+                if (!isMock) await fetch(ESP_URL + `/updateSettings?t=${t}&h=${h}&s=${s}`);
+                else { mock.tempThresh = parseFloat(t); mock.humThresh = parseFloat(h); mock.fanSpeed = parseInt(s); }
+
+                setTimeout(() => {
+                    btn.innerHTML = '<i data-lucide="check-circle" class="w-5 h-5"></i> Parametri Salvati';
+                    btn.classList.replace('bg-brand-600', 'bg-emerald-600');
+                    btn.classList.replace('hover:bg-brand-500', 'hover:bg-emerald-500');
+                    btn.classList.replace('active:bg-brand-700', 'active:bg-emerald-700');
+                    btn.classList.replace('shadow-brand-500/30', 'shadow-emerald-500/30');
+                    lucide.createIcons();
+                    setTimeout(() => {
+                        btn.innerHTML = originalHTML;
+                        btn.classList.replace('bg-emerald-600', 'bg-brand-600');
+                        btn.classList.replace('hover:bg-emerald-500', 'hover:bg-brand-500');
+                        btn.classList.replace('active:bg-emerald-700', 'active:bg-brand-700');
+                        btn.classList.replace('shadow-emerald-500/30', 'shadow-brand-500/30');
+                        lucide.createIcons();
+                    }, 2000);
+                }, 500);
+            } catch (e) { console.log(e); }
+        }
+
+        async function fetchData() {
+            try {
+                const r = await fetch(ESP_URL + '/data');
+                if(!r.ok) throw new Error();
+                isMock = false;
+                document.getElementById('livedot').className = 'status-dot live';
+                document.getElementById('conn-status').textContent = 'Online';
+                document.getElementById('conn-status').className = 'text-xs font-semibold text-emerald-400';
+                updateUI(await r.json());
+            } catch (e) {
+                isMock = true;
+                document.getElementById('livedot').className = 'status-dot dead';
+                document.getElementById('conn-status').textContent = ESP_URL ? 'Non connesso (Simulazione)' : 'Offline (Simulazione)';
+                document.getElementById('conn-status').className = 'text-xs font-semibold text-rose-400';
+                
+                // Generazione Dati Finti per la Preview
+                mock.uptime += 2;
+                mock.tBmp += (Math.random()-0.5)*0.2; mock.hAht += (Math.random()-0.5)*0.5;
+                if(mock.autoMode) mock.fanOn = (mock.tBmp > mock.tempThresh || mock.hAht > mock.humThresh);
+                
+                mock.history.ts.push(mock.uptime); mock.history.tBmp.push(mock.tBmp); mock.history.tAht.push(mock.tAht); mock.history.hAht.push(mock.hAht);
+                if(mock.history.ts.length > 20) { mock.history.ts.shift(); mock.history.tBmp.shift(); mock.history.tAht.shift(); mock.history.hAht.shift(); }
+                updateUI(mock);
+            }
+        }
+
+        fetchData();
+        setInterval(fetchData, 2000);
+    </script>
+</body>
+</html>
